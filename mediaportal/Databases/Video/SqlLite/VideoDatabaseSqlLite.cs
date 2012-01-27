@@ -105,12 +105,27 @@ namespace MediaPortal.Video.Database
         string strSQL = "ALTER TABLE \"main\".\"movieinfo\" ADD COLUMN \"strFanartURL\" text DEFAULT ''";
         m_db.Execute(strSQL);
       }
+      // Movie table
+      bool watchedUpg = false;
+
       if (DatabaseUtility.TableColumnExists(m_db, "movie", "watched") == false)
       {
         string strSQL = "ALTER TABLE \"main\".\"movie\" ADD COLUMN \"watched\" bool DEFAULT 0";
         m_db.Execute(strSQL);
+        watchedUpg = true;
+      }
+
+      if (DatabaseUtility.TableColumnExists(m_db, "movie", "iwatchedPercent") == false)
+      {
+        string strSQL = "ALTER TABLE \"main\".\"movie\" ADD COLUMN \"iwatchedPercent\" integer DEFAULT 0";
+        m_db.Execute(strSQL);
+        watchedUpg = true;
+      }
+
+      if (watchedUpg)
+      {
         // Set status for movies after upgrade
-        strSQL = String.Format("select idMovie, iswatched from movieinfo");
+        string strSQL = String.Format("select idMovie, iswatched from movieinfo");
         SQLiteResultSet results = m_db.Execute(strSQL);
 
         for (int i = 0; i < results.Rows.Count; i++)
@@ -119,8 +134,17 @@ namespace MediaPortal.Video.Database
           int watched = Int32.Parse(DatabaseUtility.Get(results, i, "iswatched"));
           if (watched > 0)
           {
-            SetMovieWatchedStatus(movieId, true);
+            SetMovieWatchedStatus(movieId, true, 100);
           }
+        }
+
+        strSQL = String.Format("select idMovie from movie where watched = 1");
+        results = m_db.Execute(strSQL);
+
+        for (int i = 0; i < results.Rows.Count; i++)
+        {
+          int movieId = Int32.Parse(DatabaseUtility.Get(results, i, "idMovie"));
+          SetMovieWatchedStatus(movieId, true, 100);
         }
       }
     }
@@ -153,7 +177,7 @@ namespace MediaPortal.Video.Database
                                "CREATE TABLE movieinfo ( idMovie integer, idDirector integer, strPlotOutline text, strPlot text, strTagLine text, strVotes text, fRating text,strCast text,strCredits text, iYear integer, strGenre text, strPictureURL text, strTitle text, IMDBID text, mpaa text,runtime integer, iswatched integer, strUserReview text, strFanartURL text)");
       DatabaseUtility.AddTable(m_db, "actorlinkmovie",
                                "CREATE TABLE actorlinkmovie ( idActor integer, idMovie integer )");
-      DatabaseUtility.AddTable(m_db, "actors",
+      DatabaseUtility.AddTable(m_db, "actors", 
                                "CREATE TABLE actors ( idActor integer primary key, strActor text )");
       DatabaseUtility.AddTable(m_db, "path",
                                "CREATE TABLE path ( idPath integer primary key, strPath text, cdlabel text)");
@@ -1540,7 +1564,7 @@ namespace MediaPortal.Video.Database
       }
     }
 
-    public void SetMovieWatchedStatus(int idMovie, bool watched)
+    public void SetMovieWatchedStatus(int idMovie, bool watched, int percent)
     {
       try
       {
@@ -1551,8 +1575,8 @@ namespace MediaPortal.Video.Database
           int iWatched = 0;
           if (watched)
             iWatched = 1;
-          sql = String.Format("update movie set watched={0} where idMovie={1}",
-                              iWatched, idMovie);
+          sql = String.Format("update movie set watched={0}, iwatchedPercent = {1} where idMovie={2}",
+                              iWatched, percent, idMovie);
         }
         m_db.Execute(sql);
       }
@@ -1563,11 +1587,11 @@ namespace MediaPortal.Video.Database
       }
     }
 
-    public bool GetMovieWatchedStatus(int idMovie)
+    public bool GetMovieWatchedStatus(int idMovie, ref int percent)
     {
       try
       {
-
+        percent = 0;
         string sql = String.Format("select * from movie where idMovie={0}", idMovie);
         SQLiteResultSet results = m_db.Execute(sql);
         if (results.Rows.Count == 0)
@@ -1576,7 +1600,8 @@ namespace MediaPortal.Video.Database
         }
         int watched;
         int.TryParse(DatabaseUtility.Get(results, 0, "watched"), out watched);
-
+        int.TryParse(DatabaseUtility.Get(results, 0, "iwatchedPercent"), out percent);
+        
         if (watched != 0)
         {
           return true;
