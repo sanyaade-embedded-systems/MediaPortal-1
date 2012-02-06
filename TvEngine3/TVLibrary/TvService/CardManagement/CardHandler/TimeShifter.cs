@@ -27,6 +27,7 @@ using TvLibrary.Implementations.DVB;
 using TvLibrary.Log;
 using TvControl;
 using TvDatabase;
+using System.Collections.Generic;
 
 namespace TvService
 {
@@ -477,6 +478,169 @@ namespace TvService
 
       Stop(ref user);
       return TvResult.UnknownError;
+    }
+
+    /// <summary>
+    /// Start timeshifting.
+    /// </summary>
+    /// <param name="user">User</param>
+    /// <param name="fileName">Name of the timeshiftfile.</param>
+    /// <param name="CustomFileName">CustomData Filname title</param>
+    /// <param name="Pids">List of Pids in integer</param>
+    /// <returns>TvResult indicating whether method succeeded</returns>
+    public TvResult StartWithCustom(ref IUser user, ref string fileName, ref string CustomFileName, ref List<int> Pids)
+    {
+        try
+        {
+            // Is the card enabled ?
+            if (_cardHandler.DataBaseCard.Enabled == false)
+            {
+                return TvResult.CardIsDisabled;
+            }
+
+            lock (this)
+            {
+                try
+                {
+                    RemoteControl.HostName = _cardHandler.DataBaseCard.ReferencedServer().HostName;
+                    if (!RemoteControl.Instance.CardPresent(_cardHandler.DataBaseCard.IdCard))
+                        return TvResult.CardIsDisabled;
+
+
+                    // Let's verify if hard disk drive has enough free space before we start time shifting. The function automatically handles both local and UNC paths
+                    if (!IsTimeShifting(ref user))
+                    {
+                        ulong FreeDiskSpace = Utils.GetFreeDiskSpace(fileName);
+
+                        TvBusinessLayer layer = new TvBusinessLayer();
+                        UInt32 MaximumFileSize = UInt32.Parse(layer.GetSetting("timeshiftMaxFileSize", "256").Value); // in MB
+                        ulong DiskSpaceNeeded = Convert.ToUInt64(MaximumFileSize);
+                        DiskSpaceNeeded *= 1000000 * 2; // Convert to bytes; 2 times of timeshiftMaxFileSize
+                        if (FreeDiskSpace < DiskSpaceNeeded)
+                        // TimeShifter need at least this free disk space otherwise, it will not start.
+                        {
+                            Stop(ref user);
+                            return TvResult.NoFreeDiskSpace;
+                        }
+                    }
+
+                    Log.Write("card: StartTimeShifting {0} {1} ", _cardHandler.DataBaseCard.IdCard, fileName);
+
+                    if (_cardHandler.IsLocal == false)
+                    {
+                        return RemoteControl.Instance.StartTimeShiftingWithCustom(ref user, ref fileName, ref CustomFileName, ref Pids);
+                    }
+                }
+                catch (Exception)
+                {
+                    Log.Error("card: unable to connect to slave controller at:{0}",
+                              _cardHandler.DataBaseCard.ReferencedServer().HostName);
+                    Stop(ref user);
+                    return TvResult.UnknownError;
+                }
+
+                ITvCardContext context = _cardHandler.Card.Context as ITvCardContext;
+                if (context == null)
+                {
+                    Stop(ref user);
+                    return TvResult.UnknownChannel;
+                }
+
+                context.GetUser(ref user);
+                ITvSubChannel subchannel = _cardHandler.Card.GetSubChannel(user.SubChannel);
+
+                if (subchannel == null)
+                {
+                    Stop(ref user);
+                    return TvResult.UnknownChannel;
+                }
+
+                _subchannel = subchannel;
+
+                Log.Write("card: CAM enabled : {0}", _cardHandler.HasCA);
+
+                if (subchannel is TvDvbChannel)
+                {
+                    if (!((TvDvbChannel)subchannel).PMTreceived)
+                    {
+                        Log.Info("start subch:{0} No PMT received. Timeshifting failed", subchannel.SubChannelId);
+                        Stop(ref user);
+                        return TvResult.UnableToStartGraph;
+                    }
+                }
+
+                if (subchannel is BaseSubChannel)
+                {
+                    ((BaseSubChannel)subchannel).AudioVideoEvent += AudioVideoEventHandler;
+                }
+
+                bool isScrambled;
+                if (subchannel.IsTimeShifting)
+                {
+                    if (!WaitForTimeShiftFile(ref user, out isScrambled))
+                    {
+                        Stop(ref user);
+                        if (isScrambled)
+                        {
+                            return TvResult.ChannelIsScrambled;
+                        }
+                        return TvResult.NoVideoAudioDetected;
+                    }
+
+                    context.OnZap(user);
+                    if (_linkageScannerEnabled)
+                        _cardHandler.Card.StartLinkageScanner(_linkageGrabber);
+                    if (_timeshiftingEpgGrabberEnabled)
+                    {
+                        Channel channel = Channel.Retrieve(user.IdChannel);
+                        if (channel.GrabEpg)
+                            _cardHandler.Card.GrabEpg();
+                        else
+                            Log.Info("TimeshiftingEPG: channel {0} is not configured for grabbing epg",
+                                     channel.DisplayName);
+                    }
+                    return TvResult.Succeeded;
+                }
+
+                bool result = subchannel.StartTimeShiftingWithCustom(fileName,CustomFileName,Pids);
+                if (result == false)
+                {
+                    Stop(ref user);
+                    return TvResult.UnableToStartGraph;
+                }
+
+                fileName += ".tsbuffer";
+                if (!WaitForTimeShiftFile(ref user, out isScrambled))
+                {
+                    Stop(ref user);
+                    if (isScrambled)
+                    {
+                        return TvResult.ChannelIsScrambled;
+                    }
+                    return TvResult.NoVideoAudioDetected;
+                }
+                context.OnZap(user);
+                if (_linkageScannerEnabled)
+                    _cardHandler.Card.StartLinkageScanner(_linkageGrabber);
+                if (_timeshiftingEpgGrabberEnabled)
+                {
+                    Channel channel = Channel.Retrieve(user.IdChannel);
+                    if (channel.GrabEpg)
+                        _cardHandler.Card.GrabEpg();
+                    else
+                        Log.Info("TimeshiftingEPG: channel {0} is not configured for grabbing epg",
+                                 channel.DisplayName);
+                }
+                return TvResult.Succeeded;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Write(ex);
+        }
+
+        Stop(ref user);
+        return TvResult.UnknownError;
     }
 
     /// <summary>

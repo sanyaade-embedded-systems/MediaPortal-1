@@ -1887,6 +1887,95 @@ namespace TvService
       return TvResult.UnknownError;
     }
 
+    /// <summary>
+    /// Start timeshifting.
+    /// </summary>
+    /// <param name="user"></param>
+    /// <param name="fileName">Name of the timeshiftfile.</param>
+    /// <param name="CustomFileName">CustomFileName</param>
+    /// <param name="Pids">Pids</param>
+    /// <returns>
+    /// TvResult indicating whether method succeeded
+    /// </returns>
+    /// 
+    public TvResult StartTimeShiftingWithCustom(ref IUser user, ref string fileName,ref string CustomFileName, ref List<int> Pids)
+    {
+        if (ValidateTvControllerParams(user))
+            return TvResult.UnknownError;
+        try
+        {
+            int cardId = user.CardId;
+            if (false == _cards[cardId].IsLocal)
+            {
+               try
+                {
+                    RemoteControl.HostName = _cards[cardId].DataBaseCard.ReferencedServer().HostName;
+                    return RemoteControl.Instance.StartTimeShiftingWithCustom(ref user, ref fileName, ref CustomFileName, ref Pids);
+                }
+                catch (Exception)
+                {
+                    Log.Error("card: unable to connect to slave controller at:{0}",
+                              _cards[cardId].DataBaseCard.ReferencedServer().HostName);
+                    return TvResult.UnknownError;
+                }
+            }
+
+            Fire(this, new TvServerEventArgs(TvServerEventType.StartTimeShifting, GetVirtualCard(user), (User)user));
+            if (_epgGrabber != null)
+            {
+                _epgGrabber.Stop();
+            }
+
+            bool isTimeShifting;
+            try
+            {
+                isTimeShifting = _cards[cardId].TimeShifter.IsTimeShifting(ref user);
+            }
+            catch (Exception ex)
+            {
+                isTimeShifting = false;
+                Log.Error("Exception in checking  " + ex.Message);
+            }
+            TvResult result = _cards[cardId].TimeShifter.StartWithCustom(ref user, ref fileName, ref CustomFileName, ref Pids);
+            if (result == TvResult.Succeeded)
+            {
+                if (!isTimeShifting)
+                {
+                    Log.Info("user:{0} card:{1} sub:{2} add stream:{3}", user.Name, user.CardId, user.SubChannel, fileName);
+                    if (File.Exists(fileName))
+                    {
+                        _streamer.Start();
+
+                        //  Default to tv
+                        bool isTv = true;
+
+                        ITvSubChannel subChannel = _cards[cardId].Card.GetSubChannel(user.SubChannel);
+
+                        if (subChannel != null && subChannel.CurrentChannel != null)
+                            isTv = subChannel.CurrentChannel.IsTv;
+                        else
+                            Log.Error("SubChannel or CurrentChannel is null when starting streaming");
+
+                        RtspStream stream = new RtspStream(String.Format("stream{0}.{1}", cardId, user.SubChannel), fileName,
+                                                           _cards[cardId].Card, isTv);
+                        _streamer.AddStream(stream);
+                    }
+                    else
+                    {
+                        Log.Write("Controller: streaming: file not found:{0}", fileName);
+                    }
+                }
+            }
+            return result;
+        }
+        catch (Exception ex)
+        {
+            Log.Write(ex);
+        }
+        return TvResult.UnknownError;
+    }
+
+
     public void StopCard(IUser user)
     {
       if (ValidateTvControllerParams(user))
@@ -2822,6 +2911,8 @@ namespace TvService
       }
     }
 
+
+
     /// <summary>
     /// Start timeshifting on a specific channel
     /// </summary>
@@ -2836,6 +2927,314 @@ namespace TvService
       bool cardChanged = false;
       return StartTimeShifting(ref user, idChannel, out card, false, out cardChanged);
     }
+
+    /// <summary>
+    /// Start timeshifting on a specific channel
+    /// </summary>
+    /// <param name="user">user credentials.</param>
+    /// <param name="idChannel">The id channel.</param>
+    /// <param name="card">returns card for which timeshifting is started</param>
+    /// <param name="forceCardId">Indicated, if the card should be forced</param>
+    /// <param name="cardChanged">indicates if card was changed</param>
+    /// <returns>
+    /// TvResult indicating whether method succeeded
+    /// </returns>
+    public TvResult StartTimeShiftingWithCustom(ref IUser user, int idChannel, out VirtualCard card, bool forceCardId,string CustomFileName, List<int> Pids)
+    {
+        bool cardChanged = false;
+        return StartTimeShiftingWithCustom(ref user, idChannel, out card, forceCardId, out cardChanged,CustomFileName,Pids);
+     }
+
+
+    /// <summary>
+    /// Start timeshifting on a specific channel
+    /// </summary>
+    /// <param name="user">user credentials.</param>
+    /// <param name="idChannel">The id channel.</param>
+    /// <param name="card">returns card for which timeshifting is started</param>
+    /// <param name="CustomFileName">Custom Filename</param>
+    /// <param name="forceCardId">ForceCard</param>
+    /// <param name="Pids">PidList</param>
+    /// <param name="cardChanged">indicates if card was changed</param>
+   /// <returns>
+   /// TvResult indicating whether method succeeded
+   /// </returns>
+      public TvResult StartTimeShiftingWithCustom(ref IUser user, int idChannel, out VirtualCard card, bool forceCardId,
+                                      out bool cardChanged,string CustomFileName, List<int> Pids)
+    {
+        cardChanged = false;
+        if (user == null)
+        {
+            card = null;
+            return TvResult.UnknownError;
+        }
+
+        string intialTimeshiftingFilename = "";
+
+        VirtualCard initialCard = null;
+
+        if (user.CardId != -1)
+            initialCard = GetVirtualCard(user);
+
+        if (initialCard != null && initialCard.TimeShiftFileName != null)
+        {
+            intialTimeshiftingFilename = initialCard.TimeShiftFileName;
+        }
+
+        Channel channel = Channel.Retrieve(idChannel);
+        Log.Write("Controller: StartTimeShifting {0} {1}", channel.DisplayName, channel.IdChannel);
+        card = null;
+        if (_epgGrabber != null)
+        {
+            _epgGrabber.Stop();
+        }
+        IUser userCopy = null;
+        try
+        {
+            TvResult result;
+            List<CardDetail> freeCards = _cardAllocation.GetFreeCardsForChannel(_cards, channel, ref user, out result);
+            if (freeCards.Count == 0)
+            {
+                //no free cards available
+                Log.Write("Controller: StartTimeShifting failed:{0}", result);
+
+                if (_epgGrabber != null && AllCardsIdle)
+                {
+                    _epgGrabber.Start();
+                }
+                return result;
+            }
+
+            int maxCards;
+            if (_maxFreeCardsToTry == 0)
+            {
+                maxCards = freeCards.Count;
+            }
+            else
+            {
+                maxCards = Math.Min(_maxFreeCardsToTry, freeCards.Count);
+
+                if (maxCards > freeCards.Count)
+                {
+                    maxCards = freeCards.Count;
+                }
+            }
+
+            Log.Write("Controller: try max {0} of {1} cards for timeshifting", maxCards, freeCards.Count);
+            TvBusinessLayer layer = new TvBusinessLayer();
+            //keep tuning each card until we are succesful                
+            for (int i = 0; i < maxCards; i++)
+            {
+                int nrOfOtherUsersTimeshiftingOnCard = 0;
+                if (i > 0)
+                {
+                    Log.Write("Controller: Timeshifting failed, lets try next available card.");
+                    cardChanged = (maxCards > 1);
+                }
+                userCopy = new User(user.Name, user.IsAdmin);
+
+                CardDetail cardInfo = freeCards[i];
+                userCopy.CardId = cardInfo.Id;
+                if (forceCardId && user.CardId != cardInfo.Id)
+                {
+                    continue;
+                }
+                IChannel tuneChannel = cardInfo.TuningDetail;
+
+                //setup folders
+                if (cardInfo.Card.RecordingFolder == String.Empty)
+                {
+                    cardInfo.Card.RecordingFolder = String.Format(@"{0}\Team MediaPortal\MediaPortal TV Server\recordings",
+                                                                  Environment.GetFolderPath(
+                                                                    Environment.SpecialFolder.CommonApplicationData));
+                    if (!Directory.Exists(cardInfo.Card.RecordingFolder))
+                    {
+                        Log.Write("Controller: creating recording folder {0} for card {0}", cardInfo.Card.RecordingFolder,
+                                  cardInfo.Card.Name);
+                        Directory.CreateDirectory(cardInfo.Card.RecordingFolder);
+                    }
+                }
+                if (cardInfo.Card.TimeShiftFolder == String.Empty)
+                {
+                    cardInfo.Card.TimeShiftFolder = String.Format(
+                      @"{0}\Team MediaPortal\MediaPortal TV Server\timeshiftbuffer",
+                      Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData));
+                    if (!Directory.Exists(cardInfo.Card.TimeShiftFolder))
+                    {
+                        Log.Write("Controller: creating timeshifting folder {0} for card {0}", cardInfo.Card.TimeShiftFolder,
+                                  cardInfo.Card.Name);
+                        Directory.CreateDirectory(cardInfo.Card.TimeShiftFolder);
+                    }
+                }
+
+                //todo : if the owner is changing channel to a new transponder, then kick any leeching users.
+                ITvCardHandler tvcard = _cards[cardInfo.Id];
+                bool isTS = tvcard.TimeShifter.IsAnySubChannelTimeshifting;
+                bool skipCard = false;
+               if (isTS)
+                {
+                    IUser[] users = tvcard.Users.GetUsers();
+                    for (int j = users.Length - 1; j > -1; j--)
+                    {
+                        IUser u = users[j];
+                        if (user.Name.Equals(u.Name))
+                        {
+                            continue;
+                        }
+
+                        IChannel tmpChannel = tvcard.CurrentChannel(ref u);
+
+                        if (tmpChannel == null)
+                        {
+                            tvcard.Users.RemoveUser(u);
+                            //removing inactive user which shouldnt happen, but atleast its better than having timeshfiting fail.
+                            continue;
+                        }
+
+                        bool isDiffTS = tuneChannel.IsDifferentTransponder(tmpChannel);
+
+                        if (isDiffTS)
+                        {
+                            Log.Write("Controller: kicking leech user {0} off card {1} since owner {2} changed transponder", u.Name,
+                                      cardInfo.Card.Name, user.Name);
+                            StopTimeShifting(ref u, TvStoppedReason.OwnerChangedTS);
+                        }
+                        else
+                        {
+                            DVBBaseChannel dvbBaseChannel = tmpChannel as DVBBaseChannel;
+                            if (dvbBaseChannel != null)
+                            {
+                                TuningDetail userChannel = layer.GetTuningDetail(dvbBaseChannel);
+                                bool isOnSameChannel = (idChannel == userChannel.IdChannel);
+
+                                if (isOnSameChannel)
+                                {
+                                    if (tvcard.Users.IsOwner(userCopy))
+                                    {
+                                        if (i < maxCards)
+                                        {
+                                            Log.Write("Controller: skipping card:{0} since other users are present on the same channel.",
+                                                      userCopy.CardId);
+                                            skipCard = true;
+                                            break; //try next card  
+                                        }
+                                    }
+                                    else
+                                    {
+                                        nrOfOtherUsersTimeshiftingOnCard++;
+                                        if (!u.IsAdmin)
+                                        {
+                                            userCopy.SubChannel = u.SubChannel;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (skipCard)
+                {
+                    continue;
+                }
+
+                //tune to the new channel                  
+                result = CardTune(ref userCopy, tuneChannel, channel);
+                if (result != TvResult.Succeeded)
+                {
+                    user.FailedCardId = userCopy.FailedCardId;
+                    StopTimeShifting(ref userCopy);
+                    continue; //try next card            
+                }
+                Log.Info("control2:{0} {1} {2}", userCopy.Name, userCopy.CardId, userCopy.SubChannel);
+                if (!IsTimeShifting(ref userCopy))
+                {
+                    CleanTimeShiftFiles(cardInfo.Card.TimeShiftFolder,
+                                        String.Format("live{0}-{1}.ts", userCopy.CardId, userCopy.SubChannel));
+                }
+                string timeshiftFileName = String.Format(@"{0}\live{1}-{2}.ts", cardInfo.Card.TimeShiftFolder, userCopy.CardId,
+                                                         userCopy.SubChannel);
+                string newfile;
+                newfile = cardInfo.Card.TimeShiftFolder + "\\" + CustomFileName;
+                CustomFileName = newfile;
+                //start timeshifting
+                result = StartTimeShiftingWithCustom(ref userCopy, ref timeshiftFileName, ref CustomFileName, ref Pids);
+                if (result != TvResult.Succeeded)
+                {
+                    StopTimeShifting(ref userCopy);
+                    continue; //try next card
+                }
+                Log.Write("Controller: StartTimeShifting started on card:{0} to {1}", userCopy.CardId, timeshiftFileName);
+                card = GetVirtualCard(userCopy);
+                card.NrOfOtherUsersTimeshiftingOnCard = nrOfOtherUsersTimeshiftingOnCard;
+                RemoveUserFromOtherCards(card.Id, userCopy); //only remove user from other cards if new tuning was a success
+                UpdateChannelStatesForUsers();
+
+                if (card != null && card.TimeShiftFileName != null)
+                {
+                    string newTimeshiftingFilename = card.TimeShiftFileName;
+                    cardChanged = (intialTimeshiftingFilename != newTimeshiftingFilename);
+                }
+
+                break; //if we made it to the bottom, then we have a successful timeshifting.
+            }
+
+            if (result != TvResult.Succeeded)
+            {
+                if (_epgGrabber != null && AllCardsIdle)
+                {
+                    _epgGrabber.Start();
+                }
+            }
+
+            return result;
+        }
+        catch (Exception ex)
+        {
+            if (userCopy != null)
+            {
+                user.FailedCardId = userCopy.FailedCardId;
+            }
+            if (_epgGrabber != null && AllCardsIdle)
+            {
+                _epgGrabber.Start();
+            }
+            Log.Write(ex);
+            return TvResult.UnknownError;
+        }
+    }
+
+    /// <summary>
+    /// Start timeshifting on a specific channel
+    /// </summary>
+    /// <param name="user">user credentials.</param>
+    /// <param name="idChannel">The id channel.</param>
+    /// <param name="card">returns card for which timeshifting is started</param>    
+    /// <returns>
+    /// TvResult indicating whether method succeeded
+    /// </returns>
+    public TvResult StartTimeShiftingWithCustom(ref IUser user, int idChannel, out VirtualCard card, string CustomFileName, List<int> Pids)
+    {
+        bool cardChanged = false;
+        return StartTimeShiftingWithCustom(ref user, idChannel, out card, false, out cardChanged,CustomFileName,Pids);
+    }
+
+    /// <summary>
+    /// Start timeshifting on a specific channel
+    /// </summary>
+    /// <param name="user">user credentials.</param>
+    /// <param name="idChannel">The id channel.</param>
+    /// <param name="card">returns card for which timeshifting is started</param>
+    /// <param name="cardChanged">indicates if card was changed</param>
+    /// <returns>
+    /// TvResult indicating whether method succeeded
+    /// </returns>
+    public TvResult StartTimeShiftingWithCustom(ref IUser user, int idChannel, out VirtualCard card, out bool cardChanged,string CustomFileName, List<int> Pids)
+    {
+        return StartTimeShiftingWithCustom(ref user, idChannel, out card, false, out cardChanged, CustomFileName, Pids);
+    }
+
+//End Custom Fileshifting
 
     /// <summary>
     /// Start timeshifting on a specific channel

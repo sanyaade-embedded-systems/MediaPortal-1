@@ -27,15 +27,19 @@
 #include "DiskRecorder.h"
 #include "teletextgrabber.h"
 #include "cagrabber.h"
+#include "CustomDataParser.h"
 
 // {C564CEB9-FC77-4776-8CB8-96DD87624161}
 
 class CTsChannel
 {
-public:
+
+    public:
+
 	CTsChannel(LPUNKNOWN pUnk, HRESULT *phr, int id);
 	virtual ~CTsChannel(void);
-  void OnTsPacket(byte* tsPacket);
+
+    void OnTsPacket(byte* tsPacket);
 	int Handle() { return m_id;}
 
 	CVideoAnalyzer* m_pVideoAnalyzer;
@@ -43,6 +47,10 @@ public:
 	CDiskRecorder*	m_pRecorder;
 	CDiskRecorder*	m_pTimeShifting;
 	CTeletextGrabber*	m_pTeletextGrabber;
-  CCaGrabber*     m_pCaGrabber;
-	int m_id;
+    CCaGrabber*     m_pCaGrabber;
+	CCustomDataParser* m_pCustomDataGrabber;
+	bool b_grabCustomPackets;
+ 	int m_id;
+	bool started;
+
 };
