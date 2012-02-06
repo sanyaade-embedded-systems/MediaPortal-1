@@ -50,6 +50,8 @@ namespace TvDatabase
     [TableColumn("starRating", NotNull = true)] private int starRating;
     [TableColumn("classification", NotNull = true)] private string classification;
     [TableColumn("parentalRating", NotNull = true)] private int parentalRating;
+    [TableColumn("seriesId", NotNull = false, NullValue = "0")] private string seriesId;
+    [TableColumn("seriesTermination", NotNull = false, NullValue = 0)] private int seriesTermination;
 
     #endregion
 
@@ -73,6 +75,34 @@ namespace TvDatabase
     #endregion
 
     #region Constructors
+
+    /// <summary> 
+    /// Create a new object by specifying all fields (except the auto-generated primary key field). 
+    /// </summary> 
+    public Program(int idChannel, DateTime startTime, DateTime endTime, string title, string description, string genre,
+                   ProgramState state, DateTime originalAirDate, string seriesNum, string episodeNum, string episodeName,
+                   string episodePart, int starRating,
+                   string classification, int parentalRating, string SeriesID, int SeriesIDTermination)
+    {
+        isChanged = true;
+        this.idChannel = idChannel;
+        this.startTime = startTime;
+        this.endTime = endTime;
+        this.title = title;
+        this.description = description;
+        this.genre = genre;
+        this.state = (int)state;
+        this.originalAirDate = originalAirDate;
+        this.seriesNum = seriesNum;
+        this.episodeNum = episodeNum;
+        this.episodeName = episodeName;
+        this.episodePart = episodePart;
+        this.starRating = starRating;
+        this.classification = classification;
+        this.parentalRating = parentalRating;
+        this.seriesId = SeriesID;
+        this.seriesTermination = SeriesIDTermination;
+  }
 
     /// <summary> 
     /// Create a new object by specifying all fields (except the auto-generated primary key field). 
@@ -222,6 +252,38 @@ namespace TvDatabase
       {
         isChanged |= genre != value;
         genre = value;
+      }
+    }
+
+    /// <summary>
+    /// Series Id is used only for Sky UK/IT/AU at the moment for 'series link' functionality
+    /// </summary>
+    public string SeriesId
+    {
+      get
+      {
+        return seriesId;
+      }
+      set
+      {
+        isChanged |= seriesId != value;
+        seriesId = value;
+      }
+    }
+
+     /// <summary>
+    /// Does this program terminate a series?  The schedule can be deleted when it is time to record this program is so
+    /// </summary>
+    public int SeriesTermination
+    {
+      get
+      {
+        return seriesTermination;
+      }
+      set
+      {
+        isChanged |= seriesTermination != value;
+        seriesTermination = value;
       }
     }
 
@@ -688,6 +750,26 @@ namespace TvDatabase
       return ObjectFactory.GetCollection<Program>(stmt.Execute());
     }
 
+    /// <summary>
+    /// Gets all programs with the specified series id (series link - Sky UK/IT/AU)
+    /// </summary>
+    /// <param name="seriesId"></param>
+    /// <param name="channelId"></param>
+    /// <returns></returns>
+    public static IList<Program> RetrieveBySeriesId(string seriesId, int channelId)
+    {
+      SqlBuilder sb = new SqlBuilder(StatementType.Select, typeof(Program));
+
+      //  Add constraints (series id and channel id)
+      sb.AddConstraint(Operator.Equals, "idChannel", channelId);
+      sb.AddConstraint(Operator.Equals, "seriesId", seriesId);
+
+      SqlStatement stmt = sb.GetStatement(true);
+
+      // execute the statement/query and create a collection of User instances from the result set
+      return ObjectFactory.GetCollection<Program>(stmt.Execute());
+    }
+
     public static IList<Program> RetrieveWeeklyEveryTimeOnThisChannel(DateTime startTime, DateTime endTime, string title,
                                                                       int channelId)
     {
@@ -1148,6 +1230,8 @@ namespace TvDatabase
                               OriginalAirDate,
                               SeriesNum, EpisodeNum, EpisodeName, EpisodePart, StarRating, Classification,
                               parentalRating);
+      p.SeriesId = SeriesId;
+      p.SeriesTermination = SeriesTermination;
       return p;
     }
 
