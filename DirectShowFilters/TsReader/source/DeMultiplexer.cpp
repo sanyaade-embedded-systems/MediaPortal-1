@@ -1373,7 +1373,7 @@ void CDeMultiplexer::FillVideoH264(CTsHeader& header, byte* tsPacket)
             }
             else //video resolution is the unchanged, but there may be other format changes
             {
-              if (m_mpegParserTriggerFormatChange && Gop && !IsAudioChanging())
+              if (m_mpegParserTriggerFormatChange && !IsAudioChanging())
               {
                 if (m_audioChanged || m_videoChanged)
                 {
@@ -1724,7 +1724,7 @@ void CDeMultiplexer::FillVideoMPEG2(CTsHeader& header, byte* tsPacket)
               }
               else //video resolution is the unchanged, but there may be other format changes
               {
-                if (m_mpegParserTriggerFormatChange && Gop && !IsAudioChanging())
+                if (m_mpegParserTriggerFormatChange && !IsAudioChanging())
                 {
                   if (m_audioChanged || m_videoChanged)
                   {
