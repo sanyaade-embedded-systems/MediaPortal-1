@@ -551,8 +551,13 @@ namespace MediaPortal.DeployTool
           break;
         case "max":
           major = 1;
+<<<<<<< HEAD
           minor = 2;
           revision = 1;
+=======
+          minor = 1;
+          revision = 8; // 1.1.8 = 1.2.0 RC1
+>>>>>>> 4e1d6f688520db76aed216be0048fc44c4cb6ff4
           break;
       }
       Version ver = new Version(major, minor, revision);
@@ -602,7 +607,11 @@ namespace MediaPortal.DeployTool
 
     public static string GetDisplayVersion()
     {
+<<<<<<< HEAD
       return "1.2.2";
+=======
+      return "1.2.0";
+>>>>>>> 4e1d6f688520db76aed216be0048fc44c4cb6ff4
     }
 
     #endregion
