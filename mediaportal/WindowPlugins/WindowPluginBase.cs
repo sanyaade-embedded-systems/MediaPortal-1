@@ -24,6 +24,7 @@ using System.Text;
 using MediaPortal.Dialogs;
 using MediaPortal.GUI.Library;
 using MediaPortal.Configuration;
+using MediaPortal.GUI.Video;
 using MediaPortal.GUI.View;
 using Action = MediaPortal.GUI.Library.Action;
 using Layout = MediaPortal.GUI.Library.GUIFacadeControl.Layout;
@@ -207,24 +208,12 @@ namespace WindowPlugins
         // Respond to the correct control.  The value is retrived directly from the control by the called handler.
         if (message.TargetControlId == btnLayouts.GetID)
         {
-          // Set the new layout and select the currently selected item in the layout.
-          SetLayout((Layout)btnLayouts.SelectedItemValue);
-          SelectCurrentItem();
-
-          // Refocus on the layout button control.
-          GUIControl.FocusControl(GetID, message.TargetControlId);
-
+          OnShowLayouts();
           msgHandled = true;
         }
         else if (btnViews != null && message.TargetControlId == btnViews.GetID)
         {
-          // Set the new view.
-          SetView(btnViews.SelectedItemValue);
-          SelectCurrentItem();
-
-          // Refocus on the view button control.
-          GUIControl.FocusControl(GetID, message.TargetControlId);
-
+          OnShowViews();
           msgHandled = true;
         }
       }
@@ -236,6 +225,7 @@ namespace WindowPlugins
     protected override void OnClicked(int controlId, GUIControl control, Action.ActionType actionType)
     {
       base.OnClicked(controlId, control, actionType);
+
       if (control == btnSortBy)
       {
         OnShowSort();
@@ -261,11 +251,23 @@ namespace WindowPlugins
       UpdateButtonStates();
     }
 
+    protected virtual void OnShowLayouts()
+    {
+      // Set the new layout and select the currently selected item in the layout.
+      SetLayout((Layout)btnLayouts.SelectedItemValue);
+      SelectCurrentItem();
+
+      // Refocus on the layout button control.
+      GUIControl.FocusControl(GetID, btnLayouts.GetID);
+    }
+
     protected virtual void OnInfo(int iItem) {}
 
     protected virtual void OnClick(int iItem) {}
 
     protected virtual void OnQueueItem(int item) {}
+
+    protected virtual void OnSearchNew() { }
 
     protected virtual void SelectCurrentItem()
     {
@@ -385,6 +387,15 @@ namespace WindowPlugins
             if (isVideoWindow)
             {
               nNewWindow = (int)Window.WINDOW_VIDEO_TITLE;
+              // Reset search variables
+              if (GUIVideoTitle.CurrentView != handler.CurrentLevelWhere)
+              {
+                GUIVideoTitle.IsActorSearch = false;
+                GUIVideoTitle.IsMovieSearch = false;
+                GUIVideoTitle.ActorSearchString = string.Empty;
+                GUIVideoTitle.MovieSearchString = string.Empty;
+                GUIVideoTitle.MovieSearchDbFieldString = string.Empty;
+              }
             }
             else
             {
@@ -412,6 +423,16 @@ namespace WindowPlugins
     }
 
     protected virtual void OnShowSort() {}
+
+    protected virtual void OnShowViews()
+    {
+      // Set the new view.
+      SetView(btnViews.SelectedItemValue);
+      SelectCurrentItem();
+
+      // Refocus on the view button control.
+      GUIControl.FocusControl(GetID, btnViews.GetID);
+    }
 
     protected virtual void LoadDirectory(string path) {}
 
